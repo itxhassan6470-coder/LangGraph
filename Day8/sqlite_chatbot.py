@@ -1,56 +1,43 @@
-from typing import TypedDict, Annotated
-
 from langgraph.graph import StateGraph, START, END
+from typing import TypedDict, Annotated
 from langgraph.graph.message import add_messages
-from langgraph.checkpoint.sqlite import SqliteSaver
-
-from langchain_core.messages import BaseMessage
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage
-
-
-
-import  sqlite3 
-
 from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
 
 load_dotenv()
 
-llm = ChatOpenAI(
+model = ChatOpenAI(
     openai_api_base="https://openrouter.ai/api/v1",
     model="openrouter/free"
 )
 
-
 class ChatState(TypedDict):
-    messages: Annotated[list[BaseMessage], add_messages]
+    messages: Annotated[list[str], add_messages]
 
+def chat(state: ChatState):
+    messages = state["messages"]
 
-def chat_node(state: ChatState):
+    response = model.invoke(messages)
 
-    response = llm.invoke(state["messages"])
-
-    return {
-        "messages": [response]
-    }
-
-thread_id = 2
+    return {"messages": [response]}
 
 graph = StateGraph(ChatState)
 
-graph.add_node("chat_node", chat_node)
+graph.add_node("chat", chat)
 
-graph.add_edge(START, "chat_node")
-graph.add_edge("chat_node", END)
+graph.add_edge(START, "chat")
+graph.add_edge("chat", END)
 
-con=sqlite3.connect(database='chatbot.db',check_same_thread=False)
+conn = sqlite3.connect(database = "chatbot.db", check_same_thread = False)
 
+checkpointer = SqliteSaver(conn=conn)
 
-checkpointer = SqliteSaver(conn=con)
+chatbot = graph.compile(checkpointer=checkpointer)
 
-chatbot = graph.compile(
-    checkpointer=checkpointer
-)
+thread_id = 2
 
 while True:
     user_message = input("Type here: ")
@@ -59,7 +46,7 @@ while True:
     if user_message.strip().lower() in ["exit", "bye", "quit"]:
         break
 
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id}, "metadata":{"thread_id": thread_id}}
 
     print("AI: ", end="")
 
@@ -72,6 +59,3 @@ while True:
             print(message_chunk.content, end="", flush=True)
 
     print("\n")
-
-state=chatbot.get_state(config)
-print(state)
